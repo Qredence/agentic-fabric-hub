@@ -79,6 +79,31 @@ export const Scene: React.FC<SceneProps> = ({
 
   const canvasBg = isDarkMode ? "bg-[#09090b]" : "bg-[#f8fafc]";
 
+  // Collapse/hierarchy support: if any ancestor is collapsed, the node is hidden.
+  const visibleNodes = useMemo(() => {
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    const hidden = new Set<string>();
+
+    const isHidden = (nodeId: string) => {
+      if (hidden.has(nodeId)) return true;
+      const visited = new Set<string>();
+      let cur = byId.get(nodeId);
+      while (cur?.parentId) {
+        if (visited.has(cur.parentId)) break; // cycle guard
+        visited.add(cur.parentId);
+        const parent = byId.get(cur.parentId);
+        if (!parent) break;
+        if (parent.collapsed) return true;
+        cur = parent;
+      }
+      return false;
+    };
+
+    return nodes.filter((n) => !isHidden(n.id));
+  }, [nodes]);
+
+  const visibleNodeById = useMemo(() => new Map(visibleNodes.map((n) => [n.id, n])), [visibleNodes]);
+
   return (
     <Canvas
       shadows
@@ -133,8 +158,8 @@ export const Scene: React.FC<SceneProps> = ({
       />
 
       {connections.map(conn => {
-        const fromNode = nodes.find(n => n.id === conn.fromId);
-        const toNode = nodes.find(n => n.id === conn.toId);
+        const fromNode = visibleNodeById.get(conn.fromId);
+        const toNode = visibleNodeById.get(conn.toId);
         if (fromNode && toNode) {
             return (
               <ConnectionLine 
@@ -149,7 +174,7 @@ export const Scene: React.FC<SceneProps> = ({
         return null;
       })}
 
-      {nodes.map(node => (
+      {visibleNodes.map(node => (
         <AssetBlock
           key={node.id}
           data={node}

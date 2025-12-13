@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { NodeType, NodeData, Connection } from '../types';
+import { EdgeCategory, NodeProvider, NodeType, NodeData, Connection } from '../types';
 
 export interface GeneratedNode {
   id: string;
@@ -7,7 +7,12 @@ export interface GeneratedNode {
   label: string;
   x: number;
   z: number;
+  y?: number;
   color?: string;
+  provider?: NodeProvider;
+  kind?: string;
+  parentId?: string;
+  collapsed?: boolean;
   metadata?: Record<string, string>;
   dimensions?: { width: number; depth: number };
   fontSize?: number;
@@ -19,6 +24,7 @@ export interface GeneratedConnection {
   toId: string;
   label?: string;
   animated?: boolean;
+  category?: EdgeCategory;
 }
 
 export interface ArchitectureResponse {
@@ -45,17 +51,30 @@ export const generateArchitecture = async (
       type: n.type, 
       label: n.label, 
       x: n.x, 
-      z: n.z 
+      z: n.z,
+      y: n.y,
+      provider: n.provider,
+      kind: n.kind,
+      parentId: n.parentId,
+      collapsed: n.collapsed
   }));
   const contextConnections = currentConnections.map(c => ({ 
     fromId: c.fromId, 
     toId: c.toId,
     label: c.label,
-    animated: c.animated
+    animated: c.animated,
+    category: c.category
   }));
 
-  const systemInstruction = `You are a System Architect for an "Agentic Fleet" orchestration system. 
-  You design workflows involving AI Agents, Tools, DSPy Modules, Execution Phases, and visually organize them.
+  const systemInstruction = `You are a System Architect for an "Agentic Factory" (Cloudcraft for agents).
+  You design and visually organize an org’s agentic stack as 3D primitives.
+  
+  Primitives should reflect:
+  - Agent frameworks (Microsoft Agent Framework): orchestrators and sub-agents (planner/router/retriever/tool-caller/supervisor)
+  - DSPy programs: program specs, training/eval assets, optimizers, compiled artifacts
+  - Microsoft Foundry resources: model endpoints, tools, knowledge bases, search indexes
+  
+  Use provider/kind to encode domain identity even if NodeType is generic.
 
   Current System State:
   ${JSON.stringify({ nodes: contextNodes, connections: contextConnections }, null, 2)}
@@ -64,6 +83,16 @@ export const generateArchitecture = async (
   1. CONFIG, DSPY_MODULE, PHASE, STRATEGY, AGENT, TOOL, TASK (Standard Blocks)
   2. SURFACE: A floor zone/area to group nodes. Needs dimensions (width, depth).
   3. ANNOTATION: 3D Text label on the board. Needs fontSize.
+  
+  Optional Fields (use them when helpful):
+  - provider: one of ${Object.values(NodeProvider).join(', ')}
+  - kind: a dot-delimited classifier like AgentFramework.Orchestrator, DSPy.ProgramSpec, Foundry.ModelEndpoint
+  - parentId: set to create hierarchy (children can be hidden when parent is collapsed)
+  - collapsed: true/false for collapsible parents
+  - y: numeric vertical layer (0 is ground layer)
+  
+  Edge Categories (use category field):
+  - ${Object.values(EdgeCategory).join(', ')}
 
   Grid Rules: Unit 2. Keep x,z integer multiples of 2.
   Connections: Default to "animated": true to show active data flow.
@@ -90,7 +119,12 @@ export const generateArchitecture = async (
                 label: { type: Type.STRING },
                 x: { type: Type.NUMBER },
                 z: { type: Type.NUMBER },
+                y: { type: Type.NUMBER },
                 color: { type: Type.STRING },
+                provider: { type: Type.STRING, enum: Object.values(NodeProvider) },
+                kind: { type: Type.STRING },
+                parentId: { type: Type.STRING },
+                collapsed: { type: Type.BOOLEAN },
                 metadata: {
                   type: Type.OBJECT,
                   properties: {
@@ -100,6 +134,9 @@ export const generateArchitecture = async (
                     requiresApiKey: { type: Type.STRING },
                     executor: { type: Type.STRING },
                     status: { type: Type.STRING },
+                    systemPrompt: { type: Type.STRING },
+                    signature: { type: Type.STRING },
+                    optimizer: { type: Type.STRING },
                   }, 
                 },
                 dimensions: {
@@ -123,7 +160,8 @@ export const generateArchitecture = async (
                 fromId: { type: Type.STRING },
                 toId: { type: Type.STRING },
                 label: { type: Type.STRING },
-                animated: { type: Type.BOOLEAN }
+                animated: { type: Type.BOOLEAN },
+                category: { type: Type.STRING, enum: Object.values(EdgeCategory) }
               },
               required: ["fromId", "toId"]
             }

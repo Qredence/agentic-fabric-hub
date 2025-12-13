@@ -3,8 +3,9 @@ import { Scene } from './components/Scene';
 import { Sidebar } from './components/Sidebar';
 import { PropertyPanel } from './components/PropertyPanel';
 import { Toolbar } from './components/Toolbar';
-import { NodeData, Connection, NodeType, GRID_SIZE } from './types';
+import { NodeData, Connection, NodeType, GRID_SIZE, NodeProvider, EdgeCategory } from './types';
 import { generateArchitecture, ArchitectureResponse } from './services/geminiService';
+import { createAgenticFactoryFile, parseAgenticFactoryJson, serializeAgenticFactoryFile } from './services/fileFormat';
 import { v4 as uuidv4 } from 'uuid';
 
 // Node color mapping for better maintainability
@@ -79,11 +80,255 @@ export default function App() {
       x: (nodes.length * GRID_SIZE) % 10,
       z: 10,
       color: getColorForType(type),
+      provider:
+        type === NodeType.DSPY_MODULE
+          ? NodeProvider.DSPY
+          : type === NodeType.AGENT
+            ? NodeProvider.AGENT_FRAMEWORK
+            : type === NodeType.SURFACE || type === NodeType.ANNOTATION
+              ? NodeProvider.GENERIC
+              : NodeProvider.GENERIC,
+      kind:
+        type === NodeType.DSPY_MODULE
+          ? 'DSPy.Module'
+          : type === NodeType.AGENT
+            ? 'AgentFramework.Agent'
+            : type === NodeType.TOOL
+              ? 'Tool'
+              : type === NodeType.SURFACE
+                ? 'Container.Zone'
+                : type === NodeType.ANNOTATION
+                  ? 'Annotation'
+                  : undefined,
       ...(type === NodeType.SURFACE ? { dimensions: { width: 6, depth: 6 } } : {}),
       ...(type === NodeType.ANNOTATION ? { fontSize: 1 } : {})
     };
     setNodes(prev => [...prev, newNode]);
     setSelectedIds(new Set([newNode.id]));
+  };
+
+  const handleAddTemplate = (templateId: string) => {
+    const mk = (partial: Omit<NodeData, 'id' | 'color'> & { color?: string }): NodeData => {
+      const type = partial.type;
+      return {
+        id: uuidv4(),
+        color: partial.color || getColorForType(type),
+        ...partial,
+      };
+    };
+
+    const newNodes: NodeData[] = [];
+    const newConnections: Connection[] = [];
+
+    if (templateId === 'af_orchestrator') {
+      // Orchestrator with sub-agents (planner/router/retriever/tool-caller/supervisor)
+      const orchestrator = mk({
+        type: NodeType.AGENT,
+        label: 'Orchestrator',
+        x: 0,
+        z: 0,
+        provider: NodeProvider.AGENT_FRAMEWORK,
+        kind: 'AgentFramework.Orchestrator',
+        metadata: {
+          role: 'Coordinates the multi-agent workflow; delegates tasks; merges results.',
+          systemPrompt: 'You are the orchestrator. Delegate to specialists and consolidate outputs.',
+        },
+      });
+      newNodes.push(orchestrator);
+
+      const roles = [
+        { label: 'Planner', kind: 'AgentFramework.Agent.Planner', x: -6, z: -4 },
+        { label: 'Router', kind: 'AgentFramework.Agent.Router', x: -6, z: 4 },
+        { label: 'Retriever', kind: 'AgentFramework.Agent.Retriever', x: 6, z: -4 },
+        { label: 'Tool-Caller', kind: 'AgentFramework.Agent.ToolCaller', x: 6, z: 4 },
+        { label: 'Supervisor', kind: 'AgentFramework.Agent.Supervisor', x: 0, z: 8 },
+      ];
+
+      const children = roles.map((r) =>
+        mk({
+          type: NodeType.AGENT,
+          label: r.label,
+          x: r.x,
+          z: r.z,
+          provider: NodeProvider.AGENT_FRAMEWORK,
+          kind: r.kind,
+          parentId: orchestrator.id,
+          metadata: { role: `${r.label} agent role.` },
+        }),
+      );
+      newNodes.push(...children);
+
+      children.forEach((child) => {
+        newConnections.push({
+          id: uuidv4(),
+          fromId: orchestrator.id,
+          toId: child.id,
+          animated: true,
+          category: EdgeCategory.CONTROL_FLOW,
+          label: 'delegate',
+        });
+      });
+    } else if (templateId === 'dspy_program') {
+      // DSPy program spec + dataset + optimizer + eval suite + compiled model
+      const program = mk({
+        type: NodeType.DSPY_MODULE,
+        label: 'DSPy Program',
+        x: 0,
+        z: 0,
+        provider: NodeProvider.DSPY,
+        kind: 'DSPy.ProgramSpec',
+        metadata: { signature: 'input -> output', optimizer: 'BootstrapFewShot' },
+      });
+
+      const dataset = mk({
+        type: NodeType.TASK,
+        label: 'Training Data',
+        x: -6,
+        z: 0,
+        provider: NodeProvider.DSPY,
+        kind: 'DSPy.Dataset',
+        metadata: { path: 'data/train.jsonl' },
+      });
+
+      const evalSuite = mk({
+        type: NodeType.TASK,
+        label: 'Eval Suite',
+        x: 6,
+        z: 0,
+        provider: NodeProvider.DSPY,
+        kind: 'DSPy.EvalSuite',
+        metadata: { path: 'evals/basic_eval.py' },
+      });
+
+      const compiled = mk({
+        type: NodeType.CONFIG,
+        label: 'Compiled Artifact',
+        x: 0,
+        z: 6,
+        provider: NodeProvider.DSPY,
+        kind: 'DSPy.CompiledProgram',
+        metadata: { model: 'provider/model-name' },
+      });
+
+      newNodes.push(program, dataset, evalSuite, compiled);
+
+      newConnections.push(
+        {
+          id: uuidv4(),
+          fromId: dataset.id,
+          toId: program.id,
+          animated: true,
+          category: EdgeCategory.DEPENDS_ON,
+          label: 'trains',
+        },
+        {
+          id: uuidv4(),
+          fromId: program.id,
+          toId: compiled.id,
+          animated: true,
+          category: EdgeCategory.DEPLOYS_TO,
+          label: 'compiles',
+        },
+        {
+          id: uuidv4(),
+          fromId: evalSuite.id,
+          toId: program.id,
+          animated: true,
+          category: EdgeCategory.DEPENDS_ON,
+          label: 'evaluates',
+        },
+      );
+    } else if (templateId === 'foundry_stack') {
+      // Foundry zone with resources: ModelEndpoint, KnowledgeBase, SearchIndex, Tool
+      const zone = mk({
+        type: NodeType.SURFACE,
+        label: 'Foundry Zone',
+        x: 0,
+        z: 0,
+        provider: NodeProvider.FOUNDRY,
+        kind: 'Foundry.Zone',
+        dimensions: { width: 16, depth: 12 },
+      });
+
+      const modelEndpoint = mk({
+        type: NodeType.CONFIG,
+        label: 'Model Endpoint',
+        x: -4,
+        z: -2,
+        provider: NodeProvider.FOUNDRY,
+        kind: 'Foundry.ModelEndpoint',
+        parentId: zone.id,
+        metadata: { model: 'gpt-4.1', path: 'foundry/endpoints/model' },
+      });
+
+      const kb = mk({
+        type: NodeType.TOOL,
+        label: 'Knowledge Base',
+        x: 4,
+        z: -2,
+        provider: NodeProvider.FOUNDRY,
+        kind: 'Foundry.KnowledgeBase',
+        parentId: zone.id,
+        metadata: { category: 'search' },
+      });
+
+      const index = mk({
+        type: NodeType.TOOL,
+        label: 'AI Search Index',
+        x: 4,
+        z: 4,
+        provider: NodeProvider.FOUNDRY,
+        kind: 'Foundry.SearchIndex',
+        parentId: zone.id,
+        metadata: { category: 'search' },
+      });
+
+      const tool = mk({
+        type: NodeType.TOOL,
+        label: 'Foundry Tool',
+        x: -4,
+        z: 4,
+        provider: NodeProvider.FOUNDRY,
+        kind: 'Foundry.Tool',
+        parentId: zone.id,
+        metadata: { category: 'custom' },
+      });
+
+      newNodes.push(zone, modelEndpoint, kb, index, tool);
+
+      newConnections.push(
+        {
+          id: uuidv4(),
+          fromId: modelEndpoint.id,
+          toId: tool.id,
+          animated: true,
+          category: EdgeCategory.CALLS_TOOL,
+          label: 'uses',
+        },
+        {
+          id: uuidv4(),
+          fromId: tool.id,
+          toId: kb.id,
+          animated: true,
+          category: EdgeCategory.RETRIEVES_FROM,
+          label: 'retrieve',
+        },
+        {
+          id: uuidv4(),
+          fromId: kb.id,
+          toId: index.id,
+          animated: true,
+          category: EdgeCategory.DEPENDS_ON,
+          label: 'indexed-by',
+        },
+      );
+    }
+
+    if (newNodes.length === 0) return;
+
+    setNodes((prev) => [...prev, ...newNodes]);
+    setConnections((prev) => [...prev, ...newConnections]);
+    setSelectedIds(new Set([newNodes[0].id]));
   };
 
   const handleGroupNodes = () => {
@@ -163,6 +408,15 @@ export default function App() {
       while (addedNew) {
         addedNew = false;
         
+        // 1) Hierarchy: if a parent moves, move all descendants
+        for (const child of prev) {
+          if (!idsToMove.has(child.id) && child.parentId && idsToMove.has(child.parentId)) {
+            idsToMove.add(child.id);
+            addedNew = true;
+          }
+        }
+
+        // 2) Surface containment: if a surface moves, move everything inside it
         const movingSurfaces = prev.filter(n => 
           idsToMove.has(n.id) && 
           n.type === NodeType.SURFACE && 
@@ -202,14 +456,32 @@ export default function App() {
   };
 
   const handleDeleteNode = (id: string) => {
-    if (selectedIds.has(id)) {
-        setNodes(prev => prev.filter(n => !selectedIds.has(n.id)));
-        setConnections(prev => prev.filter(c => !selectedIds.has(c.fromId) && !selectedIds.has(c.toId)));
-        setSelectedIds(new Set());
-    } else {
-        setNodes(prev => prev.filter(n => n.id !== id));
-        setConnections(prev => prev.filter(c => c.fromId !== id && c.toId !== id));
-    }
+    const cascadeDelete = (initial: Set<string>, allNodes: NodeData[]) => {
+      const toDelete = new Set(initial);
+      let addedNew = true;
+      while (addedNew) {
+        addedNew = false;
+        for (const n of allNodes) {
+          if (n.parentId && toDelete.has(n.parentId) && !toDelete.has(n.id)) {
+            toDelete.add(n.id);
+            addedNew = true;
+          }
+        }
+      }
+      return toDelete;
+    };
+
+    // IMPORTANT: do not call setConnections inside setNodes updater.
+    // Compute the delete set once, then update states sequentially.
+    const initial = selectedIds.has(id) ? new Set(selectedIds) : new Set([id]);
+    const toDelete = cascadeDelete(initial, nodes);
+
+    const nextNodes = nodes.filter(n => !toDelete.has(n.id));
+    const nextConnections = connections.filter(c => !toDelete.has(c.fromId) && !toDelete.has(c.toId));
+
+    setNodes(nextNodes);
+    setConnections(nextConnections);
+    setSelectedIds(new Set());
   };
 
   const handleAddConnection = (fromId: string, toId: string) => {
@@ -217,7 +489,8 @@ export default function App() {
       id: uuidv4(),
       fromId,
       toId,
-      animated: true
+      animated: true,
+      category: EdgeCategory.DATA_FLOW
     };
     setConnections(prev => [...prev, newConn]);
   };
@@ -242,13 +515,15 @@ export default function App() {
            ...n,
            id: n.id || uuidv4(),
            type: n.type as NodeType,
-           color: n.color || getColorForType(n.type as NodeType)
+           color: n.color || getColorForType(n.type as NodeType),
+           y: n.y ?? 0
         }));
         finalConnections = result.connections.map((c) => ({
            ...c,
            id: c.id || uuidv4(),
            animated: c.animated !== undefined ? c.animated : true,
-           label: c.label
+           label: c.label,
+           category: c.category
         }));
       } else {
         const nodeMap = new Map<string, NodeData>(nodes.map(n => [n.id, n]));
@@ -263,7 +538,12 @@ export default function App() {
              label: n.label,
              x: n.x,
              z: n.z,
+             y: n.y !== undefined ? n.y : (existing?.y ?? 0),
              color: color,
+             provider: n.provider !== undefined ? n.provider : existing?.provider,
+             kind: n.kind !== undefined ? n.kind : existing?.kind,
+             parentId: n.parentId !== undefined ? n.parentId : existing?.parentId,
+             collapsed: n.collapsed !== undefined ? n.collapsed : existing?.collapsed,
              metadata: { ...existing?.metadata, ...n.metadata },
              dimensions: n.dimensions || existing?.dimensions,
              fontSize: n.fontSize || existing?.fontSize
@@ -286,7 +566,8 @@ export default function App() {
                 connMap.set(key, {
                     ...existing,
                     label: c.label !== undefined ? c.label : existing.label,
-                    animated: c.animated !== undefined ? c.animated : existing.animated
+                    animated: c.animated !== undefined ? c.animated : existing.animated,
+                    category: c.category !== undefined ? c.category : existing.category
                 });
             } else {
                 connMap.set(key, {
@@ -294,7 +575,8 @@ export default function App() {
                     fromId: c.fromId,
                     toId: c.toId,
                     label: c.label,
-                    animated: c.animated !== undefined ? c.animated : true
+                    animated: c.animated !== undefined ? c.animated : true,
+                    category: c.category
                 });
             }
         });
@@ -312,13 +594,38 @@ export default function App() {
   };
 
   const handleExport = () => {
-    const data = JSON.stringify({ nodes, connections }, null, 2);
+    const file = createAgenticFactoryFile({ nodes, connections });
+    const data = serializeAgenticFactoryFile(file);
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'agent_fleet.json';
+    a.download = 'agent_fleet.af.json';
     a.click();
+  };
+
+  const handleImport = async (file: File) => {
+    try {
+      const text = await file.text();
+      const parsed = parseAgenticFactoryJson(text);
+
+      const normalizedNodes = parsed.nodes.map((n) => ({
+        ...n,
+        color: n.color || getColorForType(n.type as NodeType),
+      }));
+
+      const normalizedConnections = parsed.connections.map((c) => ({
+        ...c,
+        animated: c.animated !== undefined ? c.animated : true,
+      }));
+
+      setNodes(normalizedNodes);
+      setConnections(normalizedConnections);
+      setSelectedIds(new Set());
+    } catch (e) {
+      console.error(e);
+      alert('Failed to import JSON. Ensure it is an Agentic Factory export or legacy {nodes,connections}.');
+    }
   };
 
   return (
@@ -335,12 +642,14 @@ export default function App() {
       <Toolbar 
         onGenerate={handleGenerate} 
         onExport={handleExport} 
+        onImport={handleImport}
         isDarkMode={isDarkMode}
         onToggleTheme={() => setIsDarkMode(!isDarkMode)}
       />
       
       <Sidebar 
         onAddNode={handleAddNode} 
+        onAddTemplate={handleAddTemplate}
         isDarkMode={isDarkMode} 
       />
       

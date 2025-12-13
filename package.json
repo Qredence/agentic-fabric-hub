@@ -1,5 +1,5 @@
 {
-  "name": "isobuild-3d",
+  "name": "agentic-factory",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -9,18 +9,19 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "react-dom": "^19.2.1",
-    "three": "^0.181.2",
     "@google/genai": "^1.31.0",
+    "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.4.2",
     "lucide-react": "^0.556.0",
-    "@react-three/drei": "^10.7.7",
     "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "three": "^0.181.2",
     "uuid": "^13.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "shadcn": "^3.6.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }

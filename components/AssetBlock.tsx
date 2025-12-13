@@ -441,7 +441,7 @@ export const AssetBlock: React.FC<AssetBlockProps> = ({
     <>
       <group 
         ref={meshRef} 
-        position={[data.x, 0, data.z]} 
+        position={[data.x, data.y ?? 0, data.z]} 
         onPointerDown={handlePointerDown}
         onPointerOver={(e) => { e.stopPropagation(); setHover(true); }}
         onPointerOut={(e) => { e.stopPropagation(); setHover(false); }}

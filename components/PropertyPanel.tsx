@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { NodeData, NodeType, Connection } from '../types';
+import { NodeData, NodeProvider, NodeType, Connection, EdgeCategory } from '../types';
 import { 
   Trash2, Link as LinkIcon, X, Plus, Activity, Tag, 
   Bot, Hammer, PlayCircle, Image as ImageIcon, Loader2, 
@@ -182,6 +182,8 @@ export const PropertyPanel: React.FC<PropertyPanelProps> = ({
 
   const relatedConnections = connections.filter(c => c.fromId === node.id || c.toId === node.id);
   const potentialTargets = nodes.filter(n => n.id !== node.id && !connections.some(c => (c.fromId === node.id && c.toId === n.id) || (c.fromId === n.id && c.toId === node.id)));
+  const potentialParents = nodes.filter(n => n.id !== node.id);
+  const hasChildren = nodes.some(n => n.parentId === node.id);
 
   const updateMetadata = (key: string, value: string) => {
     const newMeta = { ...(node.metadata || {}), [key]: value };
@@ -549,6 +551,23 @@ export const PropertyPanel: React.FC<PropertyPanelProps> = ({
                 onChange={(e: any) => onChange(node.id, { label: e.target.value })}
                 themeClasses={themeClasses}
             />
+
+            <div className="grid grid-cols-2 gap-3">
+              <HeroSelect
+                label="Provider"
+                value={node.provider || NodeProvider.GENERIC}
+                onChange={(e: any) => onChange(node.id, { provider: e.target.value as any })}
+                themeClasses={themeClasses}
+                options={Object.values(NodeProvider).map((p) => ({ value: p, label: p }))}
+              />
+              <HeroInput
+                label="Kind"
+                value={node.kind || ''}
+                onChange={(e: any) => onChange(node.id, { kind: e.target.value })}
+                placeholder="e.g. AgentFramework.Orchestrator"
+                themeClasses={themeClasses}
+              />
+            </div>
             
             <div className="grid grid-cols-[1fr_1.2fr] gap-3">
                 <div className="space-y-1.5">
@@ -571,12 +590,18 @@ export const PropertyPanel: React.FC<PropertyPanelProps> = ({
                 </div>
                 
                 <div className="space-y-1.5">
-                   <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold ml-1">Position (X, Z)</label>
-                   <div className="flex gap-2">
+                   <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold ml-1">Position (X, Y, Z)</label>
+                   <div className="grid grid-cols-3 gap-2">
                        <input
                            type="number"
                            value={node.x}
                            onChange={(e) => onChange(node.id, { x: parseInt(e.target.value) || 0 })}
+                           className={`w-full ${themeClasses.input} rounded-xl px-2 py-2.5 text-xs text-center focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all`}
+                       />
+                       <input
+                           type="number"
+                           value={node.y ?? 0}
+                           onChange={(e) => onChange(node.id, { y: parseFloat(e.target.value) || 0 })}
                            className={`w-full ${themeClasses.input} rounded-xl px-2 py-2.5 text-xs text-center focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all`}
                        />
                         <input
@@ -588,6 +613,27 @@ export const PropertyPanel: React.FC<PropertyPanelProps> = ({
                    </div>
                 </div>
             </div>
+
+            <HeroSelect
+              label="Parent (hierarchy)"
+              value={node.parentId || ''}
+              onChange={(e: any) => onChange(node.id, { parentId: e.target.value || undefined })}
+              themeClasses={themeClasses}
+              options={[
+                { value: '', label: '(none)' },
+                ...potentialParents.map((p) => ({ value: p.id, label: `${p.label} (${p.type})` })),
+              ]}
+            />
+
+            {hasChildren && (
+              <HeroSwitch
+                label="Collapsed (hide children)"
+                checked={node.collapsed ?? false}
+                onChange={(e: any) => onChange(node.id, { collapsed: e.target.checked })}
+                icon={Layers}
+                themeClasses={themeClasses}
+              />
+            )}
           </div>
 
           <div className={`h-px ${themeClasses.divider} w-full`}></div>
@@ -680,6 +726,19 @@ export const PropertyPanel: React.FC<PropertyPanelProps> = ({
                                             <div className={`absolute left-0.5 top-0.5 w-3.5 h-3.5 bg-white rounded-full shadow-sm transition-transform duration-200 ease-in-out ${conn.animated ? 'translate-x-3.5' : 'translate-x-0'}`}></div>
                                         </label>
                                     </div>
+
+                                    <select
+                                        value={conn.category || EdgeCategory.DATA_FLOW}
+                                        onChange={(e) => onUpdateConnection(conn.id, { category: e.target.value as any })}
+                                        className={`${isDarkMode ? 'bg-zinc-900/50 border-zinc-800 text-zinc-300' : 'bg-zinc-50 border-zinc-200 text-zinc-700'} border rounded-lg px-2 py-1.5 text-[10px] font-bold tracking-wide uppercase focus:outline-none focus:border-brand-500/50 transition-all`}
+                                        title="Edge category"
+                                    >
+                                        {Object.values(EdgeCategory).map((cat) => (
+                                            <option key={cat} value={cat} className={themeClasses.option}>
+                                                {cat}
+                                            </option>
+                                        ))}
+                                    </select>
 
                                     <div className={`flex items-center flex-1 ${isDarkMode ? 'bg-zinc-900/50' : 'bg-zinc-50'} rounded-lg border ${isDarkMode ? 'border-zinc-800' : 'border-zinc-200'} px-2.5 py-1.5 focus-within:border-zinc-500 transition-all`}>
                                         <Tag className="w-3.5 h-3.5 text-zinc-500 mr-2 shrink-0" />

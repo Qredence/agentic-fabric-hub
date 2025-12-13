@@ -1,17 +1,19 @@
-import React, { useState } from 'react';
-import { Wand2, Loader2, Download, Sun, Moon } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { Wand2, Loader2, Download, Upload, Sun, Moon } from 'lucide-react';
 
 interface ToolbarProps {
   onGenerate: (prompt: string) => Promise<void>;
   onExport: () => void;
+  onImport: (file: File) => Promise<void> | void;
   isDarkMode: boolean;
   onToggleTheme: () => void;
 }
 
-export const Toolbar: React.FC<ToolbarProps> = ({ onGenerate, onExport, isDarkMode, onToggleTheme }) => {
+export const Toolbar: React.FC<ToolbarProps> = ({ onGenerate, onExport, onImport, isDarkMode, onToggleTheme }) => {
   const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(false);
   const [isExpanded, setExpanded] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleGenerate = async () => {
     if (!prompt.trim()) return;
@@ -80,12 +82,36 @@ export const Toolbar: React.FC<ToolbarProps> = ({ onGenerate, onExport, isDarkMo
             </button>
             
             <div className="flex items-center gap-1">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="application/json,.json"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    try {
+                      await onImport(file);
+                    } finally {
+                      // Reset so selecting the same file again triggers onChange
+                      e.target.value = '';
+                    }
+                  }}
+                />
+                <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className={`flex items-center gap-2 text-sm ${textClass} ${buttonHoverClass} px-3 py-2 rounded-lg transition-all`}
+                    title="Import JSON"
+                >
+                    <Upload className="w-4 h-4" />
+                    <span>Import</span>
+                </button>
                 <button 
                     onClick={onExport}
                     className={`flex items-center gap-2 text-sm ${textClass} ${buttonHoverClass} px-3 py-2 rounded-lg transition-all`}
                 >
                     <Download className="w-4 h-4" />
-                    <span>Export JSON</span>
+                    <span>Export</span>
                 </button>
                 <div className={`w-px h-4 mx-1 ${isDarkMode ? 'bg-zinc-700' : 'bg-zinc-200'}`}></div>
                 <button
