@@ -1,0 +1,5 @@
+{
+  "name": "IsoBuild 3D",
+  "description": "An interactive 3D isometric system architecture builder with drag-and-drop components and AI generation capabilities.",
+  "requestFramePermissions": []
+}
